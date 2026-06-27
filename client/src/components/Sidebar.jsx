@@ -19,7 +19,7 @@ export const Sidebar = () => {
         setMobileOpen(false)
     }, [pathname])
 
-    const role = "ADMIN" || "EMPLOYEE";
+    const role = "" || "EMPLOYEE";
     const navItems = [
         {name: "Dashboard", href: "/dashboard", icon: LayoutGridIcon},
         role === "ADMIN" ?
