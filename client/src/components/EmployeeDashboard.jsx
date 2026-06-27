@@ -1,6 +1,7 @@
 import React from 'react';
 import { ArrowRightIcon, CalendarIcon, DollarSignIcon, FileTextIcon } from 'lucide-react';
 import { Link } from "react-router-dom";
+import Leave from '../pages/Leave';
 
 export const EmployeeDashboard = ({ data }) => {
   const emp = data.employee;
@@ -62,7 +63,7 @@ export const EmployeeDashboard = ({ data }) => {
            Mark Attendance <ArrowRightIcon className='w-4 h-4' />
            </Link>
             <Link to="/leave" className="btn-secondary text-center">
-           Apply for Leave 
+          <Leave />
            </Link>
       </div>
     </div>
