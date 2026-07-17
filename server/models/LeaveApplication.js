@@ -2,7 +2,7 @@ import e from "express";
 import mongoose from "mongoose";
 
 const leaveApplicationScheme = new mongoose.Schema({
-    employeeId: {type: mongoose.Schema.types.ObjectId, ref: "Employee", required: true},
+    employeeId: {type: mongoose.Schema.Types.ObjectId, ref: "Employee", required: true},
     type: {type: String, enum: ["SICK", "CASUAL", "ANNUAL"], required: true},
     startDate: {type: Date, required: true},
     endDate: {type: Date, required: true},
