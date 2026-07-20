@@ -53,8 +53,10 @@ export const getPayslips = async(req,res) => {
             return res.json({data});
         }else{
             const employee = await Employee.findOne({userId: session.userId})
-            if(!employee) return res.status(404).json({error: "Not found"})
-            const payslips = (await Payslip.find({employeeId: employee._d})).sort({createdAt: -1});
+            if(!employee) {
+                 return res.status(404).json({error: "Not found"})
+            }
+            const payslips = await Payslip.find({employeeId: employee._id}).sort({createdAt: -1});
             return res.json({data: payslips})
         }
     } catch (error) {
