@@ -43,7 +43,7 @@ export const getDashboard = async (req, res) => {
                         $gte: new Date(today.getFullYear(), today.getMonth(), 1),
                         $lt: new Date(today.getFullYear(), today.getMonth() + 1, 1),
                     }
-                }).
+                }),
                 LeaveApplication.countDocuments({
                     employeeId: employee._id,
                     status: "PENDING",
@@ -54,7 +54,7 @@ export const getDashboard = async (req, res) => {
             return res.json({
                 role: "EMPLOYEE",
                 employee: {...employee, id: employee._id.toString()},
-                currrentMonthAttendance,
+                currentMonthAttendance,
                 pendingLeaves,
                 latestPayslip: latestPayslip ? {...latestPayslip, id: latestPayslip._id.toString()} : null
             })

@@ -12,7 +12,7 @@ export const getEmployees = async (req, res) => {
         const where = {};
         if (department) where.department = department;
 
-        const employees = (await Employee.find(where)).toSorted
+        const employees = await Employee.find(where).sort
             ({ createdAt: -1 }).populate("userId", "email role").lean();
 
         const result = employees.map((emp) => ({

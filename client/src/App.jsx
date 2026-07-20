@@ -16,6 +16,7 @@ export const App = () => {
     <>
     <Toaster/>
     <Routes>
+      <Route path="/" element={<Navigate to="/dashboard" replace />} />
       <Route path="/login" element={ <LoginLanding/> }/>
       
       <Route path="/login/admin" element={ <LoginForm role="admin" title="Admin Portal" subtitle="Sign in to manage the organisation"/> }/>
@@ -31,7 +32,7 @@ export const App = () => {
         <Route path="/settings" element={ <Settings/> }/>
       </Route>
       <Route path="/print/payslips/:id" element={ <PrintPayslips/> }/>
-       <Route path="*" element={ <Navigate to="/dashboard" replace/> }/>
+       <Route path="*" element={ <Navigate to="/login" replace/> }/>
     </Routes>
     </>
   )
