@@ -120,7 +120,7 @@ const attendanceReminderCron = inngest.createFunction(
 
         // step 3: get employee ids on approved leave today
         const onLeaveIds = await step.run("get-on-leave-ids", async () => {
-            const leaves = await leaveApplication.find({
+            const leaves = await LeaveApplication.find({
                 status: "APPROVED",
                 startDate: { $lte: new Date(today.endUTC) },
                 endDate: { $gte: new Date(today.startUTC) },
@@ -146,7 +146,7 @@ const attendanceReminderCron = inngest.createFunction(
                     //send emil
 
                     sendEmail({
-                        to: employee.email,
+                        to: emp.email,
                         subject: "Attendance Reminder - Please Mark Your Attendance",
                         body: `
                             <div style="max-width: 600px; font-family: Arial, sans-serif;">
