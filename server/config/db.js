@@ -1,13 +1,16 @@
 import mongoose from "mongoose";
 
 const connectDB = async () => {
+  mongoose.connection.on('connected', () => console.log("Database Connected"))
   try {
-    mongoose.connection.on('connected', () => console.log("Database Connected"))
     await mongoose.connect(process.env.MONGODB_URI)
-    
   } catch (error) {
-    console.error("Database conncetion failed:", error.message);
-    
+    // Don't swallow this - if the DB connection fails, every query later on
+    // will fail anyway with a confusing "buffering timed out" error instead
+    // of the real reason. Log the real error clearly and rethrow so the
+    // caller (server.js) knows startup actually failed.
+    console.error("❌ Database connection failed:", error.message);
+    throw error;
   }
 };
 

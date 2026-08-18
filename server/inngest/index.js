@@ -17,44 +17,64 @@ const autoCheckOut = inngest.createFunction(
         //Wait for 9 hours
         await step.sleepUntil("wait-for-the-9-hours", new Date(new Date().getTime() + 9 * 60 * 60 * 1000))
 
-        //get attendance data
+        //get attendance data (read-only, safe to re-run on replay)
         let attendance = await Attendance.findById(attendanceId)
 
         if (!attendance?.checkOut) {
-            //get Employee data
-            const employee = await Employee.findById(employeeId)
+            // send reminder email as its own memoized step.
+            // Wrapping in step.run means:
+            //   1) it will not be re-sent every time the function replays after the next sleep
+            //   2) if it fails, we swallow the error here instead of crashing the whole
+            //      function, so the auto-close-attendance step below still runs.
+            await step.run("send-checkout-reminder-email", async () => {
+                try {
+                    const employee = await Employee.findById(employeeId)
+                    if (!employee) return { skipped: true, reason: "employee-not-found" };
 
-            // send reminder email
-            await sendEmail({
-                to: employee.email,
-                subject: "Attendance Check_Out Reminder",
-                body: `
-                <div style="max-width: 600px;">
-                    <h2>Hi ${employee.firstName}, 👋</h2>
-                    <p style="font-size: 16px;">You have a check-in in ${employee.department} today:</p>
-                    <p style="font-size: 18px; font-weight: bold; color: #007bff; margin: 8px 0;">${attendance?.checkIn?.toLocaleTimeString()}</p>
-                    <p style="font-size: 16px;">Please make sure to check-out in one hour.</p>
-                    <p style="font-size: 16px;">If you have any questions, please contact your admin.</p>
-                    <br />
-                    <p style="font-size: 16px;">Best Regards,</p>
-                    <p style="font-size: 16px;">EMS</p>
-                </div>
-            `
+                    await sendEmail({
+                        to: employee.email,
+                        subject: "Attendance Check-Out Reminder",
+                        body: `
+                        <div style="max-width: 600px;">
+                            <h2>Hi ${employee.firstName}, 👋</h2>
+                            <p style="font-size: 16px;">You checked in to ${employee.department} today at:</p>
+                            <p style="font-size: 18px; font-weight: bold; color: #007bff; margin: 8px 0;">${attendance?.checkIn?.toLocaleTimeString()}</p>
+                            <p style="font-size: 16px;">You still haven't checked out. Please make sure to check-out within the next hour, otherwise your attendance will be automatically marked as a Half Day.</p>
+                            <p style="font-size: 16px;">If you have any questions, please contact your admin.</p>
+                            <br />
+                            <p style="font-size: 16px;">Best Regards,</p>
+                            <p style="font-size: 16px;">EMS</p>
+                        </div>
+                    `
+                    })
 
-
+                    return { sent: true };
+                } catch (err) {
+                    // Don't let a mail failure (SMTP/network/etc.) take down the whole
+                    // function - if it did, the auto-close step below would never run
+                    // and the attendance record would stay open (checkOut: null) forever.
+                    console.error(`Failed to send checkout reminder email for attendance ${attendanceId}`, err);
+                    return { sent: false, error: err?.message };
+                }
             })
 
             // after 10 hours, mark attendance as checked out with status "late"
             await step.sleepUntil("wait-for-the-1-hour", new Date(new Date().getTime() + 1 * 60 * 60 * 1000))
 
-            attendance = await Attendance.findById(attendanceId)
-            if (!attendance?.checkOut) {
-                attendance.checkOut = new Date(attendance.checkIn).getTime() + 4 * 60 * 60 * 1000;
-                attendance.workingHours = 4;
-                attendance.dayType = "Half Day";
-                attendance.status = "LATE";
-                await attendance.save();
-            }
+            // isolate the final write in its own step too, so it's memoized/durable
+            // and guaranteed to run exactly once regardless of what happened above.
+            await step.run("auto-close-attendance", async () => {
+                const latestAttendance = await Attendance.findById(attendanceId)
+                if (!latestAttendance?.checkOut) {
+                    latestAttendance.checkOut = new Date(new Date(latestAttendance.checkIn).getTime() + 4 * 60 * 60 * 1000);
+                    latestAttendance.workingHours = 4;
+                    latestAttendance.dayType = "Half Day";
+                    latestAttendance.status = "LATE";
+                    await latestAttendance.save();
+                    return { closed: true };
+                }
+                return { closed: false, reason: "already-checked-out" };
+            })
         }
     },
 );
@@ -73,23 +93,33 @@ const leaveApplicationReminder = inngest.createFunction(
         const leaveApplication = await LeaveApplication.findById(leaveApplicationId)
 
         if (leaveApplication?.status === "PENDING") {
-            const employee = await Employee.findById(leaveApplication.employeeId)
+            // wrapped in step.run so it's memoized (won't double-send on replay)
+            // and so a mail failure doesn't surface as an unhandled function crash
+            await step.run("send-leave-reminder-email", async () => {
+                try {
+                    const employee = await Employee.findById(leaveApplication.employeeId)
+                    if (!employee) return { skipped: true, reason: "employee-not-found" };
 
-            // send reminder email to admin to take action on leave application
-            await sendEmail({
-                to: process.env.ADMIN_EMAIL,
-                subject: "Leave Application Reminder",
-                body: `
-            <div style="max-width: 600px;">
-                <h2>Hi Admin, 👋</h2>
-                <p style="font-size: 16px;">You have a leave application in ${employee.department} today:</p>
-                <p style="font-size: 18px; font-weight: bold; color: #007bff; margin: 8px 0;">${leaveApplication?.startDate?.toLocaleDateString()}</p>
-                <p style="font-size: 16px;">Please make sure to take action on this leave application.</p>
-                <br />
-                <p style="font-size: 16px;">Best Regards,</p>
-                <p style="font-size: 16px;">EMS</p>
-            </div>
-        `
+                    await sendEmail({
+                        to: process.env.ADMIN_EMAIL,
+                        subject: "Leave Application Reminder",
+                        body: `
+                    <div style="max-width: 600px;">
+                        <h2>Hi Admin, 👋</h2>
+                        <p style="font-size: 16px;">You have a pending leave application in ${employee.department}:</p>
+                        <p style="font-size: 18px; font-weight: bold; color: #007bff; margin: 8px 0;">${leaveApplication?.startDate?.toLocaleDateString()}</p>
+                        <p style="font-size: 16px;">Please make sure to take action on this leave application.</p>
+                        <br />
+                        <p style="font-size: 16px;">Best Regards,</p>
+                        <p style="font-size: 16px;">EMS</p>
+                    </div>
+                `
+                    });
+                    return { sent: true };
+                } catch (err) {
+                    console.error(`Failed to send leave reminder email for leave ${leaveApplicationId}`, err);
+                    return { sent: false, error: err?.message };
+                }
             });
         }
     }

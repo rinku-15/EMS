@@ -22,7 +22,14 @@ export const clockInOut = async (req, res) => {
         const now = new Date();
 
         if(!existing){
-            const isLate = now.getHours() >= 9 && now.getMinutes() > 0;
+            // Late = checked in after 9:00 AM sharp.
+            // Compare total minutes-since-midnight instead of hours/minutes
+            // separately - the old check (`getHours() >= 9 && getMinutes() > 0`)
+            // incorrectly marked exact-hour check-ins (9:00:00, 10:00:00, even
+            // 9:00:00 PM) as NOT late, since minutes was 0 in those cases.
+            const LATE_CUTOFF_MINUTES = 9 * 60; // 9:00 AM
+            const minutesSinceMidnight = now.getHours() * 60 + now.getMinutes();
+            const isLate = minutesSinceMidnight > LATE_CUTOFF_MINUTES;
             const attendance = await Attendance.create({
                 employeeId: employee._id,
                 date: today,
