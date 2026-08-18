@@ -39,7 +39,7 @@ const autoCheckOut = inngest.createFunction(
                         <div style="max-width: 600px;">
                             <h2>Hi ${employee.firstName}, 👋</h2>
                             <p style="font-size: 16px;">You checked in to ${employee.department} today at:</p>
-                            <p style="font-size: 18px; font-weight: bold; color: #007bff; margin: 8px 0;">${attendance?.checkIn?.toLocaleTimeString()}</p>
+                            <p style="font-size: 18px; font-weight: bold; color: #007bff; margin: 8px 0;">${attendance?.checkIn?.toLocaleTimeString("en-IN", { timeZone: "Asia/Kolkata", hour: "2-digit", minute: "2-digit", second: "2-digit" })}</p>
                             <p style="font-size: 16px;">You still haven't checked out. Please make sure to check-out within the next hour, otherwise your attendance will be automatically marked as a Half Day.</p>
                             <p style="font-size: 16px;">If you have any questions, please contact your admin.</p>
                             <br />
@@ -123,7 +123,7 @@ const leaveApplicationReminder = inngest.createFunction(
                     <div style="max-width: 600px;">
                         <h2>Hi Admin, 👋</h2>
                         <p style="font-size: 16px;">You have a pending leave application in ${employee.department}:</p>
-                        <p style="font-size: 18px; font-weight: bold; color: #007bff; margin: 8px 0;">${leaveApplication?.startDate?.toLocaleDateString()}</p>
+                        <p style="font-size: 18px; font-weight: bold; color: #007bff; margin: 8px 0;">${leaveApplication?.startDate?.toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata" })}</p>
                         <p style="font-size: 16px;">Please make sure to take action on this leave application.</p>
                         <br />
                         <p style="font-size: 16px;">Best Regards,</p>
