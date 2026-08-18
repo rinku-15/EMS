@@ -21,7 +21,12 @@ export const clockInOut = async (req, res) => {
 
         const now = new Date();
 
-        if(!existing){
+        // Treat "no record yet" the same as "a record exists but nobody has
+        // actually checked in" (e.g. the 11:30 AM absent-reminder cron
+        // already created an ABSENT placeholder for today with checkIn:
+        // null). Both cases mean: this is genuinely their first check-in
+        // of the day.
+        if(!existing || !existing.checkIn){
             // Late = checked in after 9:00 AM sharp.
             // Compare total minutes-since-midnight instead of hours/minutes
             // separately - the old check (`getHours() >= 9 && getMinutes() > 0`)
@@ -30,12 +35,24 @@ export const clockInOut = async (req, res) => {
             const LATE_CUTOFF_MINUTES = 9 * 60; // 9:00 AM
             const minutesSinceMidnight = now.getHours() * 60 + now.getMinutes();
             const isLate = minutesSinceMidnight > LATE_CUTOFF_MINUTES;
-            const attendance = await Attendance.create({
-                employeeId: employee._id,
-                date: today,
-                checkIn: now,
-                status: isLate ? "LATE" : "PRESENT"
-            })
+
+            let attendance;
+            if (existing) {
+                // update the cron-created ABSENT placeholder in place,
+                // instead of creating a second record for the same day
+                // (which the unique employeeId+date index would reject anyway)
+                existing.checkIn = now;
+                existing.status = isLate ? "LATE" : "PRESENT";
+                await existing.save();
+                attendance = existing;
+            } else {
+                attendance = await Attendance.create({
+                    employeeId: employee._id,
+                    date: today,
+                    checkIn: now,
+                    status: isLate ? "LATE" : "PRESENT"
+                })
+            }
 
             await inngest.send({
                 name: "employee/check-out",
