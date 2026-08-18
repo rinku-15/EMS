@@ -1,6 +1,7 @@
 import { Inngest } from "inngest";
 import Attendance from "../models/Attendance.js";
 import Employee from "../models/Employee.js";
+import User from "../models/User.js";
 import LeaveApplication from "../models/LeaveApplication.js";
 import sendEmail from "../config/nodemailer.js";
 
@@ -141,18 +142,23 @@ const attendanceReminderCron = inngest.createFunction(
 
         // step 2 : get all active , non-deleted employees
         const activeEmployees = await step.run("get-active-employees", async () => {
+            // populate userId so we can filter out ADMIN accounts below -
+            // admins don't have a clock-in/clock-out UI, so they should
+            // never be treated as "absent" and reminded to mark attendance.
             const employees = await Employee.find({
                 isDeleted: false,
                 employeeStatus: "ACTIVE",
-            }).lean();
+            }).populate("userId", "role").lean();
 
-            return employees.map((e) => ({
-                _id: e._id.toString(),
-                firstName: e.firstName,
-                lastName: e.lastName,
-                email: e.email,
-                department: e.department
-            }));
+            return employees
+                .filter((e) => e.userId?.role !== "ADMIN")
+                .map((e) => ({
+                    _id: e._id.toString(),
+                    firstName: e.firstName,
+                    lastName: e.lastName,
+                    email: e.email,
+                    department: e.department
+                }));
         });
         // step 3: get employee ids on approved leave today
         const onLeaveIds = await step.run("get-on-leave-ids", async () => {
@@ -230,6 +236,49 @@ const attendanceReminderCron = inngest.createFunction(
                 return {
                     emailsSent: absentEmployees.length,
                 };
+            });
+
+            // step 7 : actually record the absence in the DB (not just email
+            // about it). Use the SAME "start of day" calculation that
+            // attendanceController.clockInOut uses for its `date` field
+            // (server-local midnight), so that if this employee checks in
+            // later today, it looks up/updates this exact same record
+            // instead of colliding with a different `date` value or
+            // silently creating a second, contradictory record for today.
+            await step.run("mark-absent-employees", async () => {
+                const dayStart = new Date();
+                dayStart.setHours(0, 0, 0, 0);
+
+                const results = await Promise.all(
+                    absentEmployees.map(async (emp) => {
+                        try {
+                            // upsert: if a record for today already exists for
+                            // this employee (shouldn't, since we already
+                            // filtered out checked-in employees, but be safe
+                            // against race conditions / retries), don't
+                            // overwrite it - only create when truly missing.
+                            const created = await Attendance.findOneAndUpdate(
+                                { employeeId: emp._id, date: dayStart },
+                                {
+                                    $setOnInsert: {
+                                        employeeId: emp._id,
+                                        date: dayStart,
+                                        checkIn: null,
+                                        checkOut: null,
+                                        status: "ABSENT",
+                                    },
+                                },
+                                { upsert: true, new: true, setDefaultsOnInsert: true }
+                            );
+                            return { employeeId: emp._id, ok: true, id: created._id };
+                        } catch (err) {
+                            console.error(`Failed to mark absence for employee ${emp._id}`, err);
+                            return { employeeId: emp._id, ok: false, error: err?.message };
+                        }
+                    })
+                );
+
+                return { marked: results.filter((r) => r.ok).length };
             });
         }
         return { totalActive: activeEmployees.length, onLeave: onLeaveIds.length, checkedIn: checkedInIds.length, absent: absentEmployees.length }

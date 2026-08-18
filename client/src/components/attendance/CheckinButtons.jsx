@@ -35,7 +35,7 @@ const CheckinButtons = ({ todayRecord, onAction }) => {
                
                 <div className='relative flex flex-col items-center text-center'>
                     <h2 className='text-lg font-medium mb-1'>{loading ? "Processing..." : isCheckedIn ? "Clock Out" : "Clock In"}</h2>
-                    <p className='text-xs opacity-80'>{isCheckedIn ? "Click to end your shit" : "start your work day"}</p>
+                    <p className='text-xs opacity-80'>{isCheckedIn ? "Click to end your shift" : "start your work day"}</p>
                 </div>
             </button>
         </div>

@@ -102,7 +102,39 @@ export const updateLeaveStatus = async(req, res) => {
         if(!["APPROVED", "REJECTED", "PENDING"].includes(status)){
             return res.status(400).json({error: "Invalid status"});
         }
-        const leave = await LeaveApplication.findByIdAndUpdate(req.params.id, {status}, {returnDocument: "after"})
+
+        const session = req.session;
+
+        // Only update if it's still PENDING - this is what actually prevents
+        // the race condition. If two admins click Approve/Reject on the same
+        // leave at nearly the same time, only the first request's findOneAndUpdate
+        // matches (status: "PENDING" at that instant) and succeeds; by the time
+        // the second request runs, status is no longer "PENDING", so it matches
+        // nothing and we return a clear "already handled" error instead of
+        // silently overwriting the first admin's decision.
+        const leave = await LeaveApplication.findOneAndUpdate(
+            { _id: req.params.id, status: "PENDING" },
+            {
+                status,
+                actionedBy: session.userId,
+                actionedAt: new Date(),
+            },
+            { returnDocument: "after" }
+        ).populate("actionedBy", "email")
+
+        if (!leave) {
+            // Either the leave doesn't exist, or it's no longer PENDING
+            // (already approved/rejected by another admin).
+            const existing = await LeaveApplication.findById(req.params.id).populate("actionedBy", "email")
+            if (!existing) {
+                return res.status(404).json({ error: "Leave application not found" });
+            }
+            return res.status(409).json({
+                error: `This leave application was already ${existing.status.toLowerCase()} by ${existing.actionedBy?.email || "another admin"}.`,
+                data: existing,
+            });
+        }
+
         return res.json({success: true, data: leave})
     } catch (error) {
         return res.status(500).json({error: "Failed"})
