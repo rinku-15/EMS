@@ -101,10 +101,25 @@ const leaveApplicationReminder = inngest.createFunction(
                     const employee = await Employee.findById(leaveApplication.employeeId)
                     if (!employee) return { skipped: true, reason: "employee-not-found" };
 
-                    await sendEmail({
-                        to: process.env.ADMIN_EMAIL,
-                        subject: "Leave Application Reminder",
-                        body: `
+                    // Notify every admin, not just one hardcoded address - the
+                    // system supports multiple admins, so every admin should
+                    // find out about a pending leave, not just whoever happens
+                    // to be set in ADMIN_EMAIL.
+                    const admins = await User.find({ role: "ADMIN" }).select("email").lean();
+                    let recipients = admins.map((a) => a.email).filter(Boolean);
+
+                    // Fallback: if for some reason no ADMIN users are found in
+                    // the DB, still fall back to ADMIN_EMAIL so the reminder
+                    // isn't silently lost.
+                    if (recipients.length === 0 && process.env.ADMIN_EMAIL) {
+                        recipients = [process.env.ADMIN_EMAIL];
+                    }
+
+                    if (recipients.length === 0) {
+                        return { sent: false, reason: "no-admin-recipients-found" };
+                    }
+
+                    const emailBody = `
                     <div style="max-width: 600px;">
                         <h2>Hi Admin, 👋</h2>
                         <p style="font-size: 16px;">You have a pending leave application in ${employee.department}:</p>
@@ -115,8 +130,19 @@ const leaveApplicationReminder = inngest.createFunction(
                         <p style="font-size: 16px;">EMS</p>
                     </div>
                 `
-                    });
-                    return { sent: true };
+
+                    const results = await Promise.allSettled(
+                        recipients.map((to) =>
+                            sendEmail({
+                                to,
+                                subject: "Leave Application Reminder",
+                                body: emailBody,
+                            })
+                        )
+                    );
+
+                    const sentCount = results.filter((r) => r.status === "fulfilled").length;
+                    return { sent: sentCount > 0, sentCount, totalRecipients: recipients.length };
                 } catch (err) {
                     console.error(`Failed to send leave reminder email for leave ${leaveApplicationId}`, err);
                     return { sent: false, error: err?.message };
