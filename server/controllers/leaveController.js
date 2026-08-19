@@ -1,7 +1,9 @@
 import { err } from "inngest/types";
 import Employee from "../models/Employee.js";
 import LeaveApplication from "../models/LeaveApplication.js";
+import User from "../models/User.js";
 import { inngest } from "../inngest/index.js";
+import sendEmail from "../config/nodemailer.js";
 
 // create leave
 // pst/api/leaves
@@ -47,6 +49,46 @@ export const createLeave = async(req, res) => {
             name: "leave/pending",
             data: {leaveApplicationId: leave._id}
         })
+
+        // Notify admins right away instead of leaving them to find out only
+        // 24 hours later via the reminder job. That reminder still exists
+        // as a backup nudge in case nobody actions it in time.
+        try {
+            const admins = await User.find({ role: "ADMIN" }).select("email").lean();
+            let recipients = admins.map((a) => a.email).filter(Boolean);
+            if (recipients.length === 0 && process.env.ADMIN_EMAIL) {
+                recipients = [process.env.ADMIN_EMAIL];
+            }
+
+            if (recipients.length > 0) {
+                const emailBody = `
+                <div style="max-width: 600px;">
+                    <h2>Hi Admin, 👋</h2>
+                    <p style="font-size: 16px;">
+                        ${employee.firstName} ${employee.lastName || ""} (${employee.department}) has submitted a new leave application:
+                    </p>
+                    <p style="font-size: 16px;">
+                        <strong>Type:</strong> ${type}<br/>
+                        <strong>From:</strong> ${new Date(startDate).toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata" })}<br/>
+                        <strong>To:</strong> ${new Date(endDate).toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata" })}<br/>
+                        <strong>Reason:</strong> ${reason}
+                    </p>
+                    <p style="font-size: 16px;">Please review and take action.</p>
+                    <br />
+                    <p style="font-size: 16px;">Best Regards,</p>
+                    <p style="font-size: 16px;">EMS</p>
+                </div>
+            `;
+                await Promise.allSettled(
+                    recipients.map((to) =>
+                        sendEmail({ to, subject: "New Leave Application Submitted", body: emailBody })
+                    )
+                );
+            }
+        } catch (mailErr) {
+            console.error(`Failed to send new-leave notification for leave ${leave._id}`, mailErr);
+            // don't fail the request just because the notification email failed
+        }
 
         return res.json({success: true, data: leave});
     } catch (error) {
@@ -120,7 +162,7 @@ export const updateLeaveStatus = async(req, res) => {
                 actionedAt: new Date(),
             },
             { returnDocument: "after" }
-        ).populate("actionedBy", "email")
+        ).populate("actionedBy", "email").populate("employeeId")
 
         if (!leave) {
             // Either the leave doesn't exist, or it's no longer PENDING
@@ -133,6 +175,45 @@ export const updateLeaveStatus = async(req, res) => {
                 error: `This leave application was already ${existing.status.toLowerCase()} by ${existing.actionedBy?.email || "another admin"}.`,
                 data: existing,
             });
+        }
+
+        // Notify the employee right away that a decision was made, instead
+        // of leaving them to find out only by checking the dashboard
+        // themselves. This is a direct request/response call (not an Inngest
+        // step), so wrap in try/catch: a mail failure here should never
+        // break the actual approve/reject action, which has already
+        // succeeded in the DB by this point.
+        if (status === "APPROVED" || status === "REJECTED") {
+            try {
+                const employee = leave.employeeId;
+                if (employee?.email) {
+                    const isApproved = status === "APPROVED";
+                    await sendEmail({
+                        to: employee.email,
+                        subject: `Leave Application ${isApproved ? "Approved" : "Rejected"}`,
+                        body: `
+                        <div style="max-width: 600px;">
+                            <h2>Hi ${employee.firstName}, 👋</h2>
+                            <p style="font-size: 16px;">
+                                Your leave application for
+                                <strong>${new Date(leave.startDate).toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata" })}</strong>
+                                to
+                                <strong>${new Date(leave.endDate).toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata" })}</strong>
+                                has been
+                                <strong style="color: ${isApproved ? "#16a34a" : "#dc2626"};">${status}</strong>.
+                            </p>
+                            <p style="font-size: 16px;">If you have any questions, please contact your admin.</p>
+                            <br />
+                            <p style="font-size: 16px;">Best Regards,</p>
+                            <p style="font-size: 16px;">EMS</p>
+                        </div>
+                    `
+                    });
+                }
+            } catch (mailErr) {
+                console.error(`Failed to send leave decision email for leave ${leave._id}`, mailErr);
+                // don't fail the request just because the notification email failed
+            }
         }
 
         return res.json({success: true, data: leave})
